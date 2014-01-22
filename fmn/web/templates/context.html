@@ -13,7 +13,24 @@
 <div class="row">
   <div class="col-md-6">
     <p>You have {{preference.filters|length}} rule filters
-    defined for this messaging context.</p>
+    defined for this messaging context.  You can add new ones and
+    delete existing ones.</p>
+    <p>If a message on the <a href="http://fedmsg.com">fedmsg bus</a> matches
+    any one of these criteria, then a notification will be sent your
+    way{% if preference.enabled %}.{% else %} (except that you currently have
+    the {{current}} delivery mechanism disabled.  Enable it and
+    <strong>then</strong> we'll send you notifications.){% endif %}
+    We also need to know where you want your {{current}} messages delivered
+    (a <em>{{context.detail_name}}</em>); you can set that up here.
+    </p>
+    {% if current == 'android' %}
+    <p>Furthermore, for android notifications you'll need to set up
+      <a href="https://github.com/fedora-infra/mobile">Fedora Mobile</a>
+      on your device.  You'll also need to use the API key (available on your
+      <a href="{{ url_for('profile', openid=openid) }}">profile page</a>) to
+      link everything together and transmit your <em>registration ids</em>.
+    </p>
+    {% endif %}
   </div>
 </div>
 
@@ -79,9 +96,40 @@
     <div class="panel panel-default">
       <div class="panel-heading">
         <h3 class="panel-title">
-            Delivery Options
+            Active?
         </h3>
+      </div> <!-- end panel-heading -->
+
+      <div class="panel-body">
+        <form class="form-horizontal" role="form" action="{{url_for('handle_details')}}"
+              method="post">
+          <p class="pull-left">
+            This message delivery mechanism is currently <strong>
+              {% if preference.enabled %}active{% else %}inactive{% endif %}.
+            </strong></p>
+          <input name="openid" id="openid" value="{{openid}}" type="hidden">
+          <input name="context" id="context" value="{{current}}" type="hidden">
+          <p class="pull-right">
+            {% if preference.enabled %}
+            <button type="submit" class="btn btn-danger" name="toggle_enable" value="toggle">
+                <span class="glyphicon glyphicon-off"></span> Disable
+            </button>
+            {% else %}
+            <button type="submit" class="btn btn-success" name="toggle_enable" value="toggle">
+                <span class="glyphicon glyphicon-ok-circle"></span> Enable
+            </button>
+            {% endif %}
+          </p>
+        </form>
       </div>
+    </div>
+
+    <div class="panel panel-default">
+      <div class="panel-heading">
+        <h3 class="panel-title">
+            Where should we send your messages?
+        </h3>
+      </div> <!-- end panel-heading -->
 
       <div class="panel-body">
         {% if confirmation %}
@@ -94,20 +142,49 @@
               method="post">
           <fieldset {{'disabled' if preference.enabled is sameas false}}>
           <div class="form-group">
-            <label class="col-sm-4 control-label" for="detail_value">{{context.detail_name}}</label>
+            {% if preference.detail_values %}
+            <label class="col-sm-4 control-label" for="detail_value">confirmed {{context.detail_name}}</label>
+            <div class="col-sm-8">
+              {% for value in preference.detail_values %}
+              <input type="text" class="form-control" name="detail_value"
+                   id="detail_value" required=required
+                   value='{{ value.value }}' disabled>
+               {% endfor %}
+            </div>
+            {% endif %}
+            <label class="col-sm-4 control-label" for="detail_value">add a new {{context.detail_name}}</label>
             <div class="col-sm-8">
               <input type="text" class="form-control" name="detail_value"
                    id="detail_value" required=required
-                   {{'' if preference.detail_value is none else 'value=' + preference.detail_value}}
-                   placeholder="{{preference.detail_value or context.placeholder}}">
+                   placeholder="{{context.placeholder}}">
             </div>
           </div>
+          <input name="openid" id="openid" value="{{openid}}" type="hidden">
+          <input name="context" id="context" value="{{current}}" type="hidden">
+          <p class="pull-right">
+            <button type="submit" class="btn btn-success" name="save"
+                {{'disabled' if preference.enabled is sameas false}}>
+                <span class="glyphicon glyphicon-{{context.icon}}"></span> Save
+            </button>
+          </p>
+          </fieldset>
+        </form>
+      </div> <!-- end panel-body -->
+    </div> <!-- end panel -->
 
-          <div class="panel-heading">
-            <h4>Batching</h4>
-            <p class="help-block">Receive messages in real-time or as a digest</p>
-          </div>
+    <div class="panel panel-default">
+      <div class="panel-heading">
+        <h3 class="panel-title">
+            How often should we send you messages?
+        </h3>
+      </div> <!-- end panel-heading -->
 
+      <div class="panel-body">
+        <p class="help-block text-left"> If you leave these <code>&lt;disabled&gt;</code>
+        then we'll just forward you your notifications in real time.  </p>
+        <form class="form-horizontal" role="form" action="{{url_for('handle_details')}}"
+              method="post">
+          <fieldset {{'disabled' if preference.enabled is sameas false}}>
           <div class="form-group">
             <label class="col-sm-1 control-label" for="batch_delta">Wait</label>
             <div class="col-sm-4">
@@ -147,15 +224,6 @@
                 {{'disabled' if preference.enabled is sameas false}}>
                 <span class="glyphicon glyphicon-{{context.icon}}"></span> Save
             </button>
-            {% if preference.enabled %}
-            <button type="submit" class="btn btn-danger" name="toggle_enable" value="toggle">
-                <span class="glyphicon glyphicon-off"></span> Disable
-            </button>
-            {% else %}
-            <button type="submit" class="btn btn-success" name="toggle_enable" value="toggle">
-                <span class="glyphicon glyphicon-ok-circle"></span> Enable
-            </button>
-            {% endif %}
           </p>
         </form>
       </div>

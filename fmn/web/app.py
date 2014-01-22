@@ -31,8 +31,8 @@ app.config.from_object('fmn.web.default_config')
 if 'FMN_WEB_CONFIG' in os.environ:  # pragma: no cover
     app.config.from_envvar('FMN_WEB_CONFIG')
 
-# Set up OpenID
-oid = OpenID(app)
+# Set up OpenID in stateless mode
+oid = OpenID(app, store_factory=lambda: None)
 
 # Inject a simple jinja2 test -- it is surprising jinja2 does not have this.
 app.jinja_env.tests['equalto'] = lambda x, y: x == y
@@ -212,6 +212,14 @@ def about():
     )
 
 
+@app.route('/home')
+@app.route('/home/')
+@login_required
+def profile_redirect():
+    # Simply redirect a user to their profile
+    return flask.redirect(flask.url_for('profile', openid=flask.g.auth.openid))
+
+
 @app.route('/<not_reserved:openid>')
 @app.route('/<not_reserved:openid>/')
 @login_required
@@ -233,8 +241,7 @@ def profile(openid):
         https=app.config.get('FMN_SSL', False),
         size=140)
 
-    prefs = fmn.lib.models.Preference.by_user(
-        SESSION, openid, allow_none=False)
+    prefs = fmn.lib.models.Preference.by_user(SESSION, openid)
 
     icons = {}
     for context in fmn.lib.models.Context.all(SESSION):
@@ -245,7 +252,26 @@ def profile(openid):
         current='profile',
         avatar=avatar,
         prefs=prefs,
-        icons=icons)
+        icons=icons,
+        api_key=user.api_key,
+        fedora_mobile=flask.request.args.get('fedora_mobile') == 'true',
+        openid_url=flask.g.auth.openid)
+
+@app.route('/reset-api-key')
+@app.route('/reset-api-key/')
+@login_required
+def reset_api_key():
+    if not flask.g.auth.logged_in:
+        flask.abort(403)
+
+    user = fmn.lib.models.User.get_or_create(
+        SESSION,
+        openid=flask.g.auth.openid,
+        openid_url=flask.g.auth.openid_url,
+    )
+
+    user.reset_api_key(SESSION)
+    return flask.redirect(flask.url_for('profile', openid=flask.g.auth.openid))
 
 
 @app.route('/<not_reserved:openid>/<context>')
@@ -440,7 +466,17 @@ def handle_details():
         SESSION, openid=openid, context=ctx)
 
     # Are they changing a delivery detail?
-    if detail_value and detail_value != pref.detail_value:
+    if detail_value:
+        # Do some validation on the specifics of the value before we commit.
+        try:
+            fmn.lib.validate_detail_value(ctx, detail_value)
+        except Exception as e:
+            raise APIError(403, dict(reason=str(e)))
+
+        # Make sure no one else has this one in play yet
+        if fmn.lib.models.DetailValue.exists(SESSION, detail_value):
+            raise APIError(403, dict(reason="That value is already claimed."))
+
         # We need to *VERIFY* that they really have this delivery detail
         # before we start doing stuff.  Otherwise, ralph could put in pingou's
         # email address and spam the crap out of him.
@@ -518,7 +554,7 @@ def handle_rule():
 
     try:
         if method == 'POST':
-            filter.add_filter(SESSION, valid_paths, code_path, **arguments)
+            filter.add_rule(SESSION, valid_paths, code_path, **arguments)
         elif method == 'DELETE':
             filter.remove_filter(SESSION, code_path)  # , **arguments)
         else:
@@ -559,7 +595,7 @@ def login():
 @app.route('/login/fedora')
 @oid.loginhandler
 def fedora_login():
-    default = flask.url_for('index')
+    default = flask.url_for('profile_redirect')
     next_url = flask.request.args.get('next', default)
     return oid.try_login(
         app.config['FMN_FEDORA_OPENID'],
@@ -589,7 +625,8 @@ def yahoo_login():
 @app.route('/logout/')
 @app.route('/logout')
 def logout():
-    flask.session.pop('openid')
+    if 'openid' in flask.session:
+        flask.session.pop('openid')
     return flask.redirect(flask.url_for('index'))
 
 
