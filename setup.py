@@ -33,6 +33,8 @@ requires = [
     'pylibravatar',
     'pydns',
     'urllib3',
+    'datanommer.models',
+    'arrow',
 ]
 
 tests_require = [
@@ -41,7 +43,7 @@ tests_require = [
 
 setup(
     name='fmn.web',
-    version='0.2.0',
+    version='0.2.1',
     description='Frontend Web Application for Fedora Notifications',
     long_description=get_description(),
     author='Ralph Bean',

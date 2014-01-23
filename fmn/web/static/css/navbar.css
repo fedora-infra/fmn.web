@@ -33,3 +33,21 @@ body {
 .carousel-caption > h3 {
     margin-top: -5px;
 }
+
+.masthead {
+    margin-top: 140px;
+    font-size: 120%;
+}
+.masthead h1 {
+    font-size: 64pt;
+}
+.masthead .lead {
+    font-size: 28pt;
+}
+.example-message strong {
+    font-size: 9pt;
+}
+.example-message img {
+    width: 24px;
+    height: 24px;
+}
