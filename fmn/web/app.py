@@ -617,6 +617,7 @@ def handle_details():
     batch_delta = form.batch_delta.data
     batch_count = form.batch_count.data
     toggle_enable = form.toggle_enable.data
+    next_url = form.next_url.data
 
     if flask.g.auth.openid != openid and not admin(flask.g.auth.openid):
         raise APIError(403, dict(reason="%r is not %r" % (
@@ -633,6 +634,27 @@ def handle_details():
 
     pref = fmn.lib.models.Preference.get_or_create(
         SESSION, openid=openid, context=ctx)
+
+    # Check to see if they pressed a delete button.
+    delete_value = flask.request.form.get('delete', None)
+
+    # Are they deleting a delivery detail?
+    if delete_value:
+        # Primarily, delete the value from this user
+        pref.delete_details(SESSION, delete_value)
+
+        # Also, if they have a confirmation hanging around, delete that too.
+        # XXX - Make sure that they cannot delete someone ELSE's confirmation.
+        confirmations = fmn.lib.models.Confirmation.by_detail(
+            SESSION, ctx, delete_value)
+        for confirmation in confirmations:
+            if confirmation.user == user:
+                user.confirmations.remove(confirmation)
+                SESSION.delete(confirmation)
+                SESSION.flush()
+
+        # Finalize all of that.
+        SESSION.commit()
 
     # Are they changing a delivery detail?
     if detail_value:
@@ -668,7 +690,7 @@ def handle_details():
     if toggle_enable:
         pref.set_enabled(SESSION, not pref.enabled)
 
-    next_url = flask.url_for(
+    next_url = next_url or flask.url_for(
         'context',
         openid=openid,
         context=context,
