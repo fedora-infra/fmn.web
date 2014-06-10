@@ -38,10 +38,13 @@ if 'FMN_WEB_CONFIG' in os.environ:  # pragma: no cover
     app.config.from_envvar('FMN_WEB_CONFIG')
 
 # Set up OpenID in stateless mode
-oid = OpenID(app, store_factory=lambda: None)
+oid = OpenID(app, safe_roots=[], store_factory=lambda: None)
 
 # Inject a simple jinja2 test -- it is surprising jinja2 does not have this.
 app.jinja_env.tests['equalto'] = lambda x, y: x == y
+
+# Also, allow 'continue' and 'break' statements in jinja loops
+app.jinja_env.add_extension('jinja2.ext.loopcontrols')
 
 fedmsg_config = fedmsg.config.load_config()
 db_url = fedmsg_config.get('fmn.sqlalchemy.uri')
@@ -51,6 +54,22 @@ if not db_url:
 fedmsg.meta.make_processors(**fedmsg_config)
 
 valid_paths = fmn.lib.load_rules(root="fmn.rules")
+
+# Pick out the submodules so we can group rules nicely in the UI
+# Order them alphabetically, except for 'generic' which comes first.
+rule_types = list(set([
+    d[path]['submodule'] for _, d in valid_paths.items() for path in d
+]))
+
+
+def _rule_type_comparator(x, y):
+    if x == 'generic':
+        return -1
+    elif y == 'generic':
+        return 1
+    return cmp(x, y)
+
+rule_types.sort(_rule_type_comparator)
 
 # Initialize our own db connection
 SESSION = fmn.lib.models.init(db_url, debug=False, create=False)
@@ -77,6 +96,7 @@ def extract_openid_identifier(openid_url):
 
 @app.before_request
 def check_auth():
+    flask.g.fedmsg_config = fedmsg_config
     flask.g.auth = Bunch(
         logged_in=False,
         method=None,
@@ -125,14 +145,15 @@ class APIError(Exception):
 
 
 def login_required(function):
-    """ Flask decorator to retrict access to logged-in users. """
+    """ Flask decorator to restrict access to logged-in users. """
     @functools.wraps(function)
     def decorated_function(*args, **kwargs):
         """ Decorated function, actually does the work. """
         if not flask.g.auth.logged_in:
             flask.flash('Login required', 'errors')
-            return flask.redirect(
-                flask.url_for('login', next=flask.request.url))
+            return flask.redirect(flask.url_for(
+                fedmsg_config.get('fmn.web.default_login', 'login'),
+                next=flask.request.url))
 
         # Ensure that the logged in user exists before we proceed.
         user = fmn.lib.models.User.get_or_create(
@@ -208,6 +229,7 @@ def inject_variable():
     return dict(openid=openid,
                 contexts=contexts,
                 valid_paths=valid_paths,
+                rule_types=rule_types,
                 web_version=web_version,
                 lib_version=lib_version,
                 rules_version=rules_version)
@@ -288,14 +310,11 @@ def link_fedora_mobile(openid, api_key, registration_id):
     # We need to *VERIFY* that they really have this delivery detail
     # before we start doing stuff.  Otherwise, ralph could put in pingou's
     # email address and spam the crap out of him.
-    if fedmsg_config.get('fmn.verify_delivery_details', True):
-        con = fmn.lib.models.Confirmation.get_or_create(
-            SESSION, openid=openid, context=ctx)
-        con.set_value(SESSION, registration_id)
-        con.set_status(SESSION, 'pending')
-    else:
-        # Otherwise, just change the details right away.  Never do this.
-        pref.update_details(SESSION, registration_id)
+    con = fmn.lib.models.Confirmation.get_or_create(
+        SESSION, openid=openid, context=ctx)
+    con.set_value(SESSION, registration_id)
+    con.set_status(SESSION, 'pending')
+
     return {"status": "ok"}
 
 @app.route('/confirm/<action>/<not_reserved:openid>/<secret>/<api_key>/')
@@ -399,6 +418,11 @@ def context(openid, context):
 
     context = fmn.lib.models.Context.by_name(SESSION, context)
     if not context:
+        flask.abort(404)
+
+    if context.name not in fedmsg_config['fmn.backends']:
+        # TODO - is there a better status code for this?  More like
+        # "temporariliy unavailable" or "under construction"
         flask.abort(404)
 
     pref = fmn.lib.models.Preference.get_or_create(
@@ -571,9 +595,7 @@ def handle_filter():
                 filter_id=filter.id,
             )
         elif method == 'DELETE':
-            filter = pref.get_filter_name(SESSION, filter_name)
-            SESSION.delete(filter)
-            SESSION.commit()
+            pref.delete_filter(SESSION, filter_name)
             next_url = flask.url_for(
                 'context',
                 openid=openid,
@@ -617,7 +639,11 @@ def handle_details():
     batch_delta = form.batch_delta.data
     batch_count = form.batch_count.data
     toggle_enable = form.toggle_enable.data
+    toggle_triggered_by = form.toggle_triggered_by.data
+    toggle_shorten = form.toggle_shorten.data
+    toggle_markup = form.toggle_markup.data
     next_url = form.next_url.data
+    reset_to_defaults = form.reset_to_defaults.data
 
     if flask.g.auth.openid != openid and not admin(flask.g.auth.openid):
         raise APIError(403, dict(reason="%r is not %r" % (
@@ -671,14 +697,10 @@ def handle_details():
         # We need to *VERIFY* that they really have this delivery detail
         # before we start doing stuff.  Otherwise, ralph could put in pingou's
         # email address and spam the crap out of him.
-        if fedmsg_config.get('fmn.verify_delivery_details', True):
-            con = fmn.lib.models.Confirmation.get_or_create(
-                SESSION, openid=openid, context=ctx)
-            con.set_value(SESSION, detail_value)
-            con.set_status(SESSION, 'pending')
-        else:
-            # Otherwise, just change the details right away.  Never do this.
-            pref.update_details(SESSION, detail_value)
+        con = fmn.lib.models.Confirmation.get_or_create(
+            SESSION, openid=openid, context=ctx)
+        con.set_value(SESSION, detail_value)
+        con.set_status(SESSION, 'pending')
 
     # Let them change batch_delta and batch_count as they please.
     if batch_delta or batch_count:
@@ -689,6 +711,21 @@ def handle_details():
     # Also, let them enable or disable as they please.
     if toggle_enable:
         pref.set_enabled(SESSION, not pref.enabled)
+
+    if toggle_triggered_by:
+        pref.set_triggered_by_links(SESSION, not pref.triggered_by_links)
+
+    if toggle_shorten:
+        pref.set_shorten_links(SESSION, not pref.shorten_links)
+
+    if toggle_markup:
+        pref.set_markup_messages(SESSION, not pref.markup_messages)
+
+    if reset_to_defaults:
+        for flt in pref.filters:
+            SESSION.delete(flt)
+        SESSION.flush()
+        fmn.lib.defaults.create_defaults_for(SESSION, user, pref.context)
 
     next_url = next_url or flask.url_for(
         'context',

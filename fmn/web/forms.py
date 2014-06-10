@@ -20,8 +20,13 @@ class DetailsForm(Form):
 
     # Did they press the button?
     toggle_enable = TextField('toggle_enable')
+    toggle_triggered_by = TextField('toggle_triggered_by')
+    toggle_shorten = TextField('toggle_shorten')
+    toggle_markup = TextField('toggle_markup')
 
     next_url = TextField('next_url')
+
+    reset_to_defaults = TextField('reset_to_defaults')
 
 
 class RuleForm(Form):
