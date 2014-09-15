@@ -513,7 +513,7 @@ def example_messages(openid, context, filter_id, page):
     # for which we're trying to find example messages.
     preferences = [pref.__json__()]
     preferences[0]['detail_values'] = ['mock']
-    preferences[0]['filters'] = [filter.__json__()]
+    preferences[0]['filters'] = [filter.__json__(reify=True)]
 
     results = []
     for message in messages:
@@ -573,9 +573,8 @@ def handle_filter():
         raise APIError(403, dict(reason="%r is not %r" % (
             flask.g.auth.openid, openid
         )))
-
-    if method not in ['POST', 'DELETE']:
-        raise APIError(405, dict(reason="Only POST and DELETE accepted"))
+    if method not in ['POST', 'DISABLE', 'ENABLE', 'DELETE']:
+        raise APIError(405, dict(reason="Only POST, ENABLE, DISABLE, and DELETE accepted"))
 
     user = fmn.lib.models.User.by_openid(SESSION, openid)
     if not user:
@@ -602,6 +601,20 @@ def handle_filter():
                 openid=openid,
                 context=context,
                 filter_id=filter.id,
+            )
+        elif method == 'DISABLE':
+            pref.set_filter_active(SESSION, filter_name, False)
+            next_url = flask.url_for(
+                'context',
+                openid=openid,
+                context=context,
+            )
+        elif method == 'ENABLE':
+            pref.set_filter_active(SESSION, filter_name, True)
+            next_url = flask.url_for(
+                'context',
+                openid=openid,
+                context=context,
             )
         elif method == 'DELETE':
             pref.delete_filter(SESSION, filter_name)
@@ -676,7 +689,8 @@ def handle_details():
     # Are they deleting a delivery detail?
     if delete_value:
         # Primarily, delete the value from this user
-        pref.delete_details(SESSION, delete_value)
+        if detail_value in pref.detail_values:
+            pref.delete_details(SESSION, delete_value)
 
         # Also, if they have a confirmation hanging around, delete that too.
         # XXX - Make sure that they cannot delete someone ELSE's confirmation.
@@ -770,8 +784,9 @@ def handle_rule():
             flask.g.auth.openid, openid
         )))
 
-    if method not in ['POST', 'DELETE']:
-        raise APIError(405, dict(reason="Only POST and DELETE accepted"))
+    if method not in ['POST', 'DELETE', 'NEGATE']:
+        raise APIError(405, dict(
+            reason="Only POST, NEGATE and DELETE accepted"))
 
     user = fmn.lib.models.User.by_openid(SESSION, openid)
     if not user:
@@ -792,6 +807,8 @@ def handle_rule():
     try:
         if method == 'POST':
             filter.add_rule(SESSION, valid_paths, code_path, **arguments)
+        elif method == 'NEGATE':
+            filter.negate_rule(SESSION, code_path)
         elif method == 'DELETE':
             filter.remove_rule(SESSION, code_path)  # , **arguments)
         else:

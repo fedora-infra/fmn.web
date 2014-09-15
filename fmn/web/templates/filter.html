@@ -6,18 +6,34 @@
       <small>for the {{current}} messaging context</small></h1>
 </div>
 
-<div class="row">
+<div class="row-fluid">
   <div class="col-md-1 col-md-offset-10">
-    <form class="form-horizontal" role="form"
+    <form class="form-inline" role="form"
       action="{{url_for('handle_filter')}}" method="post">
       <input name="openid" id="openid" value="{{openid}}" type="hidden">
       <input name="context" id="context" value="{{current}}" type="hidden">
       <input name="filter_name" id="filter_name" value="{{filter.name}}" type="hidden">
-      <input name="method" id="method" value="delete" type="hidden">
+      <div class="btn-group">
+      <span>
+      {% if filter.active %}
+      <button type="submit" class="btn btn-warning"
+          name="method" value="disable" style="margin-bottom: 6px;">
+          <span class="glyphicon glyphicon-remove">Disable this filter</span>
+      </button>
+      {% else %}
+      <button type="submit" class="btn btn-success"
+          name="method" value="enable" style="margin-bottom: 6px">
+          <span class="glyphicon glyphicon-ok">Enable this filter</span>
+      </button>
+      {% endif %}
+      </span>
+      <span>
       <button type="submit" class="btn btn-danger"
-        name="delete" value="{{filter.id}}">
+        name="method" value="delete">
         <span class="glyphicon glyphicon-remove">Delete this filter</span>
       </button>
+      </span>
+    </button>
     </form>
   </div>
 </div>
@@ -36,19 +52,40 @@
               <dt>{{key}}</dt><dd>{{value}}</dd>
               {% endfor %}
           </dl>
-          <form role="form" action="{{url_for('handle_rule')}}" method="post">
-            <input name="rule_name" id="rule_name" value="{{rule.code_path}}" type="hidden">
-            <input name="openid" id="openid" value="{{openid}}" type="hidden">
-            <input name="context" id="context" value="{{current}}" type="hidden">
-            <input name="filter_id" id="filter_id" value="{{filter.id}}" type="hidden">
-            <input name="method" id="method" value="delete" type="hidden">
-            <span class="pull-right">
-                <button type="submit" class="btn btn-danger">
-                    <span class="glyphicon glyphicon-remove"></span>
-                    Delete this rule</button>
-            </span>
-          </form>
-        <div class="clearfix"></div>
+        </p>
+        <p class="list-group-item-text">
+          <div class="row">
+            <div class="col-md-offset-1 col-md-2">
+              <form class="form-inline" role="form" action="{{url_for('handle_rule')}}" method="post">
+                <input name="rule_name" id="rule_name" value="{{rule.code_path}}" type="hidden">
+                <input name="openid" id="openid" value="{{openid}}" type="hidden">
+                <input name="context" id="context" value="{{current}}" type="hidden">
+                <input name="filter_id" id="filter_id" value="{{filter.id}}" type="hidden">
+                <input name="method" id="method" value="negate" type="hidden">
+                {% if rule.negated %}
+                <button type="submit" class="btn btn-danger btn-xs">
+                    <span class="glyphicon glyphicon-exclamation-sign"></span>
+                    Match if False</button>
+                {% else %}
+                <button type="submit" class="btn btn-success btn-xs">
+                    <span class="glyphicon glyphicon-ok-circle"></span>
+                    Match if True</button>
+                {% endif %}
+              </form>
+            </div>
+            <div class="col-md-offset-6 col-md-2">
+              <form class="form-inline" role="form" action="{{url_for('handle_rule')}}" method="post">
+                <input name="rule_name" id="rule_name" value="{{rule.code_path}}" type="hidden">
+                <input name="openid" id="openid" value="{{openid}}" type="hidden">
+                <input name="context" id="context" value="{{current}}" type="hidden">
+                <input name="filter_id" id="filter_id" value="{{filter.id}}" type="hidden">
+                <input name="method" id="method" value="delete" type="hidden">
+                  <button type="submit" class="btn btn-danger btn-xs">
+                      <span class="glyphicon glyphicon-remove"></span>
+                      Delete This Rule</button>
+              </form>
+            </div>
+          </div>
         </p>
       </span>
     {% endfor %}
