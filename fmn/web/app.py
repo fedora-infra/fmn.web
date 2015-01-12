@@ -8,7 +8,6 @@ from pkg_resources import get_distribution
 import arrow
 import docutils
 import docutils.examples
-import fedora.client
 import fedmsg.config
 import fedmsg.meta
 import jinja2
@@ -16,10 +15,10 @@ import libravatar
 import markupsafe
 
 import flask
-import sqlalchemy
 from flask.ext.openid import OpenID
 
 import fmn.lib
+import fmn.lib.hinting
 import fmn.lib.models
 import fmn.web.converters
 import fmn.web.forms
@@ -38,7 +37,8 @@ if 'FMN_WEB_CONFIG' in os.environ:  # pragma: no cover
     app.config.from_envvar('FMN_WEB_CONFIG')
 
 # Set up OpenID in stateless mode
-oid = OpenID(app, safe_roots=[], store_factory=lambda: None)
+oid = OpenID(app, safe_roots=[], store_factory=lambda: None,
+             url_root_as_trust_root=True)
 
 # Inject a simple jinja2 test -- it is surprising jinja2 does not have this.
 app.jinja_env.tests['equalto'] = lambda x, y: x == y
@@ -156,7 +156,7 @@ def login_required(function):
                 next=flask.request.url))
 
         # Ensure that the logged in user exists before we proceed.
-        user = fmn.lib.models.User.get_or_create(
+        fmn.lib.models.User.get_or_create(
             SESSION,
             openid=flask.g.auth.openid,
             openid_url=flask.g.auth.openid_url,
@@ -295,7 +295,8 @@ def link_fedora_mobile(openid, api_key, registration_id):
     if not ctx:
         raise APIError(403, dict(reason="android is not a context"))
 
-    pref = fmn.lib.models.Preference.get_or_create(
+    # Ensure that the preference exists before we proceed.
+    fmn.lib.models.Preference.get_or_create(
         SESSION, openid=openid, context=ctx)
 
     try:
@@ -481,8 +482,11 @@ def example_messages(openid, context, filter_id, page):
 
     filter = pref.get_filter(SESSION, filter_id)
 
+    hinting = fmn.lib.hinting.gather_hinting(filter, valid_paths)
+
     # Now, connect to datanommer and get the latest bazillion messages
-    bazillion = 500
+    # (adjusting by any hinting the rules we're evalulating might provide).
+    bazillion = 400
     try:
         total, pages, messages = datanommer.models.Message.grep(
             start=datetime.datetime.fromtimestamp(1),
@@ -490,6 +494,7 @@ def example_messages(openid, context, filter_id, page):
             rows_per_page=bazillion,
             page=page,
             order='desc',
+            **hinting
         )
     except Exception as e:
         log.exception(e)
@@ -523,9 +528,12 @@ def example_messages(openid, context, filter_id, page):
         if recips:
             results.append(_make_result(message, original))
 
+    next_page = page + 1
+    if page > pages:
+        next_page = None
     return dict(
         results=results,
-        next_page=page + 1,
+        next_page=next_page,
     )
 
 
@@ -689,7 +697,7 @@ def handle_details():
     # Are they deleting a delivery detail?
     if delete_value:
         # Primarily, delete the value from this user
-        if detail_value in pref.detail_values:
+        if delete_value in [value.value for value in pref.detail_values]:
             pref.delete_details(SESSION, delete_value)
 
         # Also, if they have a confirmation hanging around, delete that too.
@@ -839,7 +847,8 @@ def login():
     openid_server = flask.request.form.get('openid', None)
     if openid_server:
         return oid.try_login(
-            openid_server, ask_for=['email', 'fullname', 'nickname'])
+            openid_server, ask_for=['email', 'fullname', 'nickname'],
+            ask_for_optional=[])
 
     return flask.render_template(
         'login.html', next=oid.get_next_url(), error=oid.fetch_error())
@@ -853,7 +862,8 @@ def fedora_login():
     next_url = flask.request.args.get('next', default)
     return oid.try_login(
         app.config['FMN_FEDORA_OPENID'],
-        ask_for=['email', 'fullname', 'nickname'])
+        ask_for=['email', 'fullname', 'nickname'],
+        ask_for_optional=[])
 
 @app.route('/login/google/')
 @app.route('/login/google')
@@ -863,7 +873,8 @@ def google_login():
     next_url = flask.request.args.get('next', default)
     return oid.try_login(
         "https://www.google.com/accounts/o8/id",
-        ask_for=['email', 'fullname'])
+        ask_for=['email', 'fullname'],
+        ask_for_optional=[])
 
 @app.route('/login/yahoo/')
 @app.route('/login/yahoo')
@@ -873,7 +884,8 @@ def yahoo_login():
     next_url = flask.request.args.get('next', default)
     return oid.try_login(
         "https://me.yahoo.com/",
-        ask_for=['email', 'fullname'])
+        ask_for=['email', 'fullname'],
+        ask_for_optional=[])
 
 
 @app.route('/logout/')
