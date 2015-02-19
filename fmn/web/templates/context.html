@@ -167,14 +167,14 @@
       <div class="panel-body">
         {% if confirmation %}
         <div class="alert alert-{{ {'pending': 'info', 'valid': 'info', 'accepted': 'success', 'rejected': 'danger', 'invalid': 'warning'}[confirmation.status] }}">
-          <p><strong>{{confirmation.status}}</strong> Your confirmation for
+          <p>Your {{ context.detail_name }} for
           {% if context.name == "android" %}
           {{confirmation.detail_value[0:30]}}...
           {% else %}
           {{confirmation.detail_value}}
           {% endif %}
-          is {{confirmation.status}}.
-          {% if confirmation.status == "pending" %}
+          is <strong>{{confirmation.status}}</strong>.
+          {% if confirmation.status in ["pending", "valid"] %}
           You should be contacted soon with confirmation details via {{context.name}}.
           {% endif %}
           </p>
@@ -447,8 +447,8 @@
             method="post">
             <p class="pull-left">If you like, we can destroy all your existing
             filters for the {{current}} context and restore the "factory
-            defaults": the settings that were in place when you first created
-            your account.</p>
+            defaults": the settings that we think are the best for new users, a
+            nice blank slate that you can customize as you please. </p>
             <p><strong>Beware, there is no way to undo this operation.
             </strong></p>
             <input name="openid" id="openid" value="{{openid}}" type="hidden">
