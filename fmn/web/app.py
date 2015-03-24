@@ -305,7 +305,7 @@ def link_fedora_mobile(openid, api_key, registration_id):
         SESSION, openid=openid, context=ctx)
 
     try:
-        fmn.lib.validate_detail_value(ctx, registration_id)
+        fmn.lib.validate_detail_value(ctx, registration_id, fedmsg_config)
     except Exception as e:
         raise APIError(403, dict(reason=str(e)))
 
@@ -368,14 +368,25 @@ def profile(openid):
     if (not flask.g.auth.logged_in or (
         flask.g.auth.openid != openid and
             not admin(flask.g.auth.openid))):
-
         flask.abort(403)
 
-    user = fmn.lib.models.User.get_or_create(
-        SESSION,
-        openid=flask.g.auth.openid,
-        openid_url=flask.g.auth.openid_url,
-    )
+    user = fmn.lib.models.User.get(SESSION, openid=openid)
+
+    # Does this user exist, or is it a first visit?
+    if not user:
+
+        # If this is an admin looking at a user that doesn't exist, bail.
+        if flask.g.auth.openid != openid:
+            flask.abort(404)
+
+        # Otherwise, if you are looking at your own profile, and it doesn't
+        # exist, then create it.
+        user = fmn.lib.models.User.get_or_create(
+            SESSION,
+            openid=flask.g.auth.openid,
+            openid_url=flask.g.auth.openid_url,
+        )
+
     avatar = libravatar.libravatar_url(
         openid=user.openid_url,
         https=app.config.get('FMN_SSL', False),
@@ -395,7 +406,9 @@ def profile(openid):
         icons=icons,
         api_key=user.api_key,
         fedora_mobile=flask.request.args.get('fedora_mobile') == 'true',
-        openid_url=flask.g.auth.openid)
+        openid=user.openid,
+        openid_url=user.openid_url,
+    )
 
 
 @app.route('/reset-api-key')
@@ -428,7 +441,9 @@ def context_json(openid, context):
         for rule in filter['rules']:
             prefix, key = rule['code_path'].split(':', 1)
             rule['info'] = copy.copy(valid_paths[prefix][key])
+            # Remove these.  They are not JSON-serializable.
             del rule['info']['func']
+            del rule['info']['hints-callable']
 
     return flask.jsonify(pref)
 
@@ -475,7 +490,9 @@ def filter_json(openid, context, filter_id):
     for rule in filter['rules']:
         prefix, key = rule['code_path'].split(':', 1)
         rule['info'] = copy.copy(valid_paths[prefix][key])
+        # Remove these.  They are not JSON-serializable.
         del rule['info']['func']
+        del rule['info']['hints-callable']
 
     return flask.jsonify(filter)
 
@@ -636,14 +653,18 @@ def handle_filter():
     openid = form.openid.data
     context = form.context.data
     filter_name = form.filter_name.data
+    filter_id = form.filter_id.data
     method = (form.method.data or flask.request.method).upper()
 
     if flask.g.auth.openid != openid and not admin(flask.g.auth.openid):
         raise APIError(403, dict(reason="%r is not %r" % (
             flask.g.auth.openid, openid
         )))
-    if method not in ['POST', 'DISABLE', 'ENABLE', 'DELETE']:
-        raise APIError(405, dict(reason="Only POST, ENABLE, DISABLE, and DELETE accepted"))
+    if method not in ['POST', 'DISABLE', 'ENABLE', 'DELETE',
+                      'ENABLE-ONESHOT', 'DISABLE-ONESHOT']:
+        raise APIError(405, dict(reason="Only POST, ENABLE, DISABLE, DELETE,"
+                                        " ENABLE-ONESHOT and DISABLE-ONESHOT"
+                                        " accepted"))
 
     user = fmn.lib.models.User.by_openid(SESSION, openid)
     if not user:
@@ -658,13 +679,14 @@ def handle_filter():
 
     try:
         if method == 'POST':
-            # Ensure that a filter with this name doesn't already exist.
-            if pref.has_filter_name(SESSION, filter_name):
-                raise APIError(404, dict(
-                    reason="%r already exists" % filter_name))
+            if pref.has_filter(SESSION, filter_id):
+                filter = pref.get_filter(SESSION, filter_id)
+                filter.name = filter_name
+                SESSION.commit()
+            else:
+                filter = fmn.lib.models.Filter.create(SESSION, filter_name)
+                pref.add_filter(SESSION, filter)
 
-            filter = fmn.lib.models.Filter.create(SESSION, filter_name)
-            pref.add_filter(SESSION, filter)
             next_url = flask.url_for(
                 'filter',
                 openid=openid,
@@ -687,6 +709,20 @@ def handle_filter():
             )
         elif method == 'DELETE':
             pref.delete_filter(SESSION, filter_name)
+            next_url = flask.url_for(
+                'context',
+                openid=openid,
+                context=context,
+            )
+        elif method == 'DISABLE-ONESHOT':
+            pref.set_filter_oneshot(SESSION, filter_name, False)
+            next_url = flask.url_for(
+                'context',
+                openid=openid,
+                context=context,
+            )
+        elif method == 'ENABLE-ONESHOT':
+            pref.set_filter_oneshot(SESSION, filter_name, True)
             next_url = flask.url_for(
                 'context',
                 openid=openid,
@@ -716,6 +752,58 @@ def int_or_none(value):
         raise APIError(400, dict(batch_delta=["Not a valid integer value"]))
 
 
+@app.route('/api/argument', methods=['POST'])
+@api_method
+def handle_argument():
+    form = fmn.web.forms.ArgumentForm(flask.request.form)
+
+    if not form.validate():
+        raise APIError(400, form.errors)
+
+    openid = form.openid.data
+    context = form.context.data
+    filter_id = form.filter_id.data
+    rule_name = form.rule_name.data
+
+    key = form.key.data
+    value = form.value.data
+
+    if flask.g.auth.openid != openid and not admin(flask.g.auth.openid):
+        raise APIError(403, dict(reason="%r is not %r" % (
+            flask.g.auth.openid, openid
+        )))
+
+    user = fmn.lib.models.User.by_openid(SESSION, openid)
+    if not user:
+        raise APIError(403, dict(reason="%r is not a user" % openid))
+
+    ctx = fmn.lib.models.Context.by_name(SESSION, context)
+    if not ctx:
+        raise APIError(403, dict(reason="%r is not a context" % context))
+
+    pref = fmn.lib.models.Preference.get_or_create(
+        SESSION, openid=openid, context=ctx)
+
+    if not pref.has_filter(SESSION, filter_id):
+        raise APIError(404, dict(reason="%r is not a filter" % filter_id))
+
+    filter = pref.get_filter(SESSION, filter_id)
+
+    if not filter.has_rule(SESSION, rule_name):
+        raise APIError(404, dict(reason="%r is not a rule" % rule_name))
+
+    rule = filter.get_rule(SESSION, rule_name)
+    rule.set_argument(SESSION, key, value)
+
+    next_url = flask.url_for(
+        'filter',
+        openid=openid,
+        context=context,
+        filter_id=filter_id,
+    )
+    return dict(message="ok", url=next_url)
+
+
 @app.route('/api/details', methods=['POST'])
 @api_method
 def handle_details():
@@ -733,8 +821,10 @@ def handle_details():
     toggle_triggered_by = form.toggle_triggered_by.data
     toggle_shorten = form.toggle_shorten.data
     toggle_markup = form.toggle_markup.data
+    toggle_verbose = form.toggle_verbose.data
     next_url = form.next_url.data
     reset_to_defaults = form.reset_to_defaults.data
+    delete_all_filters = form.delete_all_filters.data
 
     if flask.g.auth.openid != openid and not admin(flask.g.auth.openid):
         raise APIError(403, dict(reason="%r is not %r" % (
@@ -778,7 +868,7 @@ def handle_details():
     if detail_value:
         # Do some validation on the specifics of the value before we commit.
         try:
-            fmn.lib.validate_detail_value(ctx, detail_value)
+            fmn.lib.validate_detail_value(ctx, detail_value, fedmsg_config)
         except Exception as e:
             raise APIError(403, dict(reason=str(e)))
 
@@ -813,11 +903,19 @@ def handle_details():
     if toggle_markup:
         pref.set_markup_messages(SESSION, not pref.markup_messages)
 
+    if toggle_verbose:
+        pref.set_verbose(SESSION, not pref.verbose)
+
     if reset_to_defaults:
         for flt in pref.filters:
             SESSION.delete(flt)
         SESSION.flush()
         fmn.lib.defaults.create_defaults_for(SESSION, user, pref.context)
+
+    if delete_all_filters:
+        for flt in pref.filters:
+            SESSION.delete(flt)
+        SESSION.commit()
 
     next_url = next_url or flask.url_for(
         'context',
