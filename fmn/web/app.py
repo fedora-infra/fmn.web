@@ -818,6 +818,8 @@ def handle_details():
     openid = form.openid.data
     context = form.context.data
     detail_value = form.detail_value.data
+    if context == 'sse':
+        detail_value = 'sse-'+openid
     batch_delta = form.batch_delta.data
     batch_count = form.batch_count.data
     toggle_enable = form.toggle_enable.data
