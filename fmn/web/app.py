@@ -807,6 +807,13 @@ def handle_argument():
     return dict(message="ok", url=next_url)
 
 
+def activate_sse(con, openid):
+    if not con.detail_value:
+        detail_value = 'sse-' + openid
+        con.set_value(SESSION, detail_value)
+        con.set_status(SESSION, 'accepted')
+
+
 @app.route('/api/details', methods=['POST'])
 @api_method
 def handle_details():
@@ -818,8 +825,6 @@ def handle_details():
     openid = form.openid.data
     context = form.context.data
     detail_value = form.detail_value.data
-    #if context == 'sse':
-    #    detail_value = 'sse-'+openid
     batch_delta = form.batch_delta.data
     batch_count = form.batch_count.data
     toggle_enable = form.toggle_enable.data
@@ -868,6 +873,12 @@ def handle_details():
 
         # Finalize all of that.
         SESSION.commit()
+
+    #  setup sse
+    if ctx.name == 'sse' and not pref.enabled:
+        con = fmn.lib.models.Confirmation.get_or_create(
+            SESSION, openid=openid, context=ctx)
+        activate_sse(con=con, openid=user.openid)
 
     # Are they changing a delivery detail?
     if detail_value:
