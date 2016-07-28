@@ -456,11 +456,10 @@ def context(openid, context):
     # add sse url to the context to display to the user
     if str(pref.context_name) == 'sse':
         # set default value value
-        sse_url = 'http://localhost:8080/'
+        sse_url = fedmsg_config.get('fmn.sse.url', 'http://localhost:8080/')
+        # TODO: update below once fedora groups get their own fedmsg config
+        sse_route = sse_url + 'user/' if sse_url.endswith("/") else '/user/'
         try:
-            sse_url = fedmsg_config['fmn.sse.url']
-            # TODO: update below once fedora groups get their own fedmsg config
-            sse_route = sse_url + 'user/'
             sse_route += openid.split(".")[0]
         except:
             pass
