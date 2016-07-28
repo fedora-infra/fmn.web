@@ -458,11 +458,8 @@ def context(openid, context):
         # set default value value
         sse_url = fedmsg_config.get('fmn.sse.url', 'http://localhost:8080/')
         # TODO: update below once fedora groups get their own fedmsg config
-        sse_route = sse_url + 'user/' if sse_url.endswith("/") else '/user/'
-        try:
-            sse_route += openid.split(".")[0]
-        except:
-            pass
+        sse_route = sse_url + ('user/' if sse_url.endswith("/") else '/user/')
+        sse_route += openid.split(".", 1)[0]
         context.extra = {'sse_url': sse_route}
 
     return flask.render_template(
