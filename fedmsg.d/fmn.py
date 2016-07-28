@@ -39,6 +39,9 @@ config = {
     "fmn.irc.port": 6667,
     "fmn.irc.timeout": 120,
 
+    # SSE
+    "fmn.sse.url": "http://localhost:8080/",
+
     # GCM - Android notifs
     "fmn.gcm.post_url": "wat",
     "fmn.gcm.api_key": "wat",

@@ -452,6 +452,20 @@ def context_json(openid, context):
 @login_required
 def context(openid, context):
     context, pref = _get_context(openid, context)
+
+    # add sse url to the context to display to the user
+    if str(pref.context_name) == 'sse':
+        # set default value value
+        sse_url = 'http://localhost:8080/'
+        try:
+            sse_url = fedmsg_config['fmn.sse.url']
+            # TODO: update below once fedora groups get their own fedmsg config
+            sse_route = sse_url + 'user/'
+            sse_route += openid.split(".")[0]
+        except:
+            pass
+        context.extra = {'sse_url': sse_route}
+
     return flask.render_template(
         'context.html',
         current=context.name,
@@ -874,11 +888,16 @@ def handle_details():
         # Finalize all of that.
         SESSION.commit()
 
-    #  setup sse
+    # **Monkey Patch Starts**
+    # Activate sse automatically for the user
+    # this should be done in fmn.lib but when a context is created and
+    # detail_name is set to None it doesn't set detail_value which is needed
+    # by the backend
     if ctx.name == 'sse' and not pref.enabled:
         con = fmn.lib.models.Confirmation.get_or_create(
             SESSION, openid=openid, context=ctx)
         activate_sse(con=con, openid=user.openid)
+    # **Monkey Patch Ends**
 
     # Are they changing a delivery detail?
     if detail_value:
