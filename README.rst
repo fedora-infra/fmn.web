@@ -1,5 +1,8 @@
 fmn.web
 =======
+This repository is kept for historical purposes only. It was merged into the
+fmn repository and you should look there if you would like to contribute or
+report an issue!
 
 `fmn <https://github.com/fedora-infra/fmn>`_ is a family of systems to manage
 end-user notifications triggered by
